@@ -44,7 +44,8 @@ const login = async (req, res) => {
         httpOnly: true, //accessible only by web server 
         secure: true, //https
         sameSite: 'None', //cross-site cookie 
-        maxAge: 7 * 24 * 60 * 60 * 1000 //cookie expiry: set to match rT
+        maxAge: 7 * 24 * 60 * 60 * 1000, //cookie expiry: set to match rT
+        domain: '.onrender.com'
     })
 
     // Send accessToken containing username and roles 
