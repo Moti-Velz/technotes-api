@@ -1,122 +1,131 @@
-const Note = require('../models/Note')
 const User = require('../models/User')
+const Note = require('../models/Note')
+const bcrypt = require('bcrypt')
 
-// @desc Get all notes 
-// @route GET /notes
+// @desc Get all users
+// @route GET /users
 // @access Private
-const getAllNotes = async (req, res) => {
-    // Get all notes from MongoDB
-    const notes = await Note.find().lean()
+const getAllUsers = async (req, res) => {
+    // Get all users from MongoDB
+    const users = await User.find().select('-password').lean()
 
-    // If no notes 
-    if (!notes?.length) {
-        return res.status(400).json({ message: 'No notes found' })
+    // If no users 
+    if (!users?.length) {
+        return res.status(400).json({ message: 'No users found' })
     }
 
-    // Add username to each note before sending the response 
-    // See Promise.all with map() here: https://youtu.be/4lqJBBEpjRE 
-    // You could also do this with a for...of loop
-    const notesWithUser = await Promise.all(notes.map(async (note) => {
-        const user = await User.findById(note.user).lean().exec()
-        return { ...note, username: user.username }
-    }))
-
-    res.json(notesWithUser)
+    res.json(users)
 }
 
-// @desc Create new note
-// @route POST /notes
+// @desc Create new user
+// @route POST /users
 // @access Private
-const createNewNote = async (req, res) => {
-    const { user, title, text } = req.body
+const createNewUser = async (req, res) => {
+    const { username, password, roles } = req.body
 
     // Confirm data
-    if (!user || !title || !text) {
+    if (!username || !password) {
         return res.status(400).json({ message: 'All fields are required' })
     }
 
-    // Check for duplicate title
-    const duplicate = await Note.findOne({ title }).collation({ locale: 'en', strength: 2 }).lean().exec()
+    // Check for duplicate username
+    const duplicate = await User.findOne({ username }).collation({ locale: 'en', strength: 2 }).lean().exec()
 
     if (duplicate) {
-        return res.status(409).json({ message: 'Duplicate note title' })
+        return res.status(409).json({ message: 'Duplicate username' })
     }
 
-    // Create and store the new user 
-    const note = await Note.create({ user, title, text })
+    // Hash password 
+    const hashedPwd = await bcrypt.hash(password, 10) // salt rounds
 
-    if (note) { // Created 
-        return res.status(201).json({ message: 'New note created' })
+    const userObject = (!Array.isArray(roles) || !roles.length)
+        ? { username, "password": hashedPwd }
+        : { username, "password": hashedPwd, roles }
+
+    // Create and store new user 
+    const user = await User.create(userObject)
+
+    if (user) { //created 
+        res.status(201).json({ message: `New user ${username} created` })
     } else {
-        return res.status(400).json({ message: 'Invalid note data received' })
+        res.status(400).json({ message: 'Invalid user data received' })
     }
-
 }
 
-// @desc Update a note
-// @route PATCH /notes
+// @desc Update a user
+// @route PATCH /users
 // @access Private
-const updateNote = async (req, res) => {
-    const { id, user, title, text, completed } = req.body
+const updateUser = async (req, res) => {
+    const { id, username, roles, active, password } = req.body
 
-    // Confirm data
-    if (!id || !user || !title || !text || typeof completed !== 'boolean') {
-        return res.status(400).json({ message: 'All fields are required' })
+    // Confirm data 
+    if (!id || !username || !Array.isArray(roles) || !roles.length || typeof active !== 'boolean') {
+        return res.status(400).json({ message: 'All fields except password are required' })
     }
 
-    // Confirm note exists to update
-    const note = await Note.findById(id).exec()
+    // Does the user exist to update?
+    const user = await User.findById(id).exec()
 
-    if (!note) {
-        return res.status(400).json({ message: 'Note not found' })
+    if (!user) {
+        return res.status(400).json({ message: 'User not found' })
     }
 
-    // Check for duplicate title
-    const duplicate = await Note.findOne({ title }).collation({ locale: 'en', strength: 2 }).lean().exec()
+    // Check for duplicate 
+    const duplicate = await User.findOne({ username }).collation({ locale: 'en', strength: 2 }).lean().exec()
 
-    // Allow renaming of the original note 
+    // Allow updates to the original user 
     if (duplicate && duplicate?._id.toString() !== id) {
-        return res.status(409).json({ message: 'Duplicate note title' })
+        return res.status(409).json({ message: 'Duplicate username' })
     }
 
-    note.user = user
-    note.title = title
-    note.text = text
-    note.completed = completed
+    user.username = username
+    user.roles = roles
+    user.active = active
 
-    const updatedNote = await note.save()
+    if (password) {
+        // Hash password 
+        user.password = await bcrypt.hash(password, 10) // salt rounds 
+    }
 
-    res.json(`'${updatedNote.title}' updated`)
+    const updatedUser = await user.save()
+
+    res.json({ message: `${updatedUser.username} updated` })
 }
 
-// @desc Delete a note
-// @route DELETE /notes
+// @desc Delete a user
+// @route DELETE /users
 // @access Private
-const deleteNote = async (req, res) => {
+const deleteUser = async (req, res) => {
     const { id } = req.body
 
     // Confirm data
     if (!id) {
-        return res.status(400).json({ message: 'Note ID required' })
+        return res.status(400).json({ message: 'User ID Required' })
     }
 
-    // Confirm note exists to delete 
-    const note = await Note.findById(id).exec()
-
-    if (!note) {
-        return res.status(400).json({ message: 'Note not found' })
+    // Does the user still have assigned notes?
+    const note = await Note.findOne({ user: id }).lean().exec()
+    if (note) {
+        return res.status(400).json({ message: 'User has assigned notes' })
     }
 
-    const result = await note.deleteOne()
+    // Does the user exist to delete?
+    const user = await User.findById(id).exec()
 
-    const reply = `Note '${result.title}' with ID ${result._id} deleted`
+    if (!user) {
+        return res.status(400).json({ message: 'User not found' })
+    }
+
+    const result = await user.deleteOne()
+
+    const reply = `Username ${result.username} with ID ${result._id} deleted`
 
     res.json(reply)
 }
 
 module.exports = {
-    getAllNotes,
-    createNewNote,
-    updateNote,
-    deleteNote
+    getAllUsers,
+    createNewUser,
+    updateUser,
+    deleteUser
 }
