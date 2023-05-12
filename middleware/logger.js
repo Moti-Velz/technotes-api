@@ -19,8 +19,10 @@ const logEvents = async (message, logFileNAme) => {
 }
 
 const logger = (req, res, next) => {
+    const headers  = JSON.stringify(req.headers);
+
     logEvents(`${req.method}\t${req.url}\t${req.headers.origin}`, 'reqLog.log') 
-    console.log(`${req.method} ${req.path}`)
+    console.log(`${req.method} ${req.path} ${headers}`)
     next()
 }
 
